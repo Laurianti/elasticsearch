@@ -35,6 +35,7 @@ import java.util.List;
 
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationConstraint.finite;
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationConstraint.union;
+import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.find;
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.mapFinite;
 
 /**
@@ -178,7 +179,7 @@ public final class MetadataManipulationFunction extends PromqlFunctionCall {
         // translateIntermediate that forces the initial per-series aggregate for a not-yet-aggregated subtree.
         IntermediateResult aggregated = child.kind().afterInitialAggregation
             ? child
-            : context.collapse(child, child.header(), child.value());
+            : context.collapse(child, context.rawRequirement(child, childRequired), child.value());
 
         Source source = source();
         Attribute destination = destination();
@@ -198,10 +199,8 @@ public final class MetadataManipulationFunction extends PromqlFunctionCall {
         if (unshadowed.size() < plan.output().size()) {
             plan = new Project(context.cmd().source(), plan, unshadowed);
         }
-        TranslationConstraint header = union(aggregated.header(), finite(List.of(name)));
         return new IntermediateResult(
             plan,
-            header,
             aggregated.value(),
             aggregated.step(),
             aggregated.pendingFilter(),
@@ -258,10 +257,10 @@ public final class MetadataManipulationFunction extends PromqlFunctionCall {
     /**
      * The value of a source label as a non-null string: {@code COALESCE(ToString(label), "")}, or {@code ""} if the
      * table does not carry the label. The lookup reads the table's plan, so it sees stored labels only: a destination an
-     * enclosing {@code by(dst)} requires is a name in the header, never a column here, and cannot resolve to itself.
+     * enclosing {@code by(dst)} requires is a name in the requirement, never a column here, and cannot resolve to itself.
      */
     private Expression sourceLabelValue(TranslationContext context, Source source, IntermediateResult table, String labelName) {
-        Attribute label = table.label(labelName);
+        Attribute label = find(table.plan().output(), labelName);
         if (label == null) {
             return Literal.keyword(source, "");
         }

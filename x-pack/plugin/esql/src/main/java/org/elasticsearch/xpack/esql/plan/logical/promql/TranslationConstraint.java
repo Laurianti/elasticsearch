@@ -9,18 +9,19 @@ package org.elasticsearch.xpack.esql.plan.logical.promql;
 
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * The existing label requirements and available columns, shared by parent and child translations.
- * Labels required by name, optionally together with packed columns each excluding a set of names.
- * This is a selection, not an inventory of storage projections: combining requirements only combines
- * their label names and exclusion sets, without creating physical record projections.
+ * The label requirement a parent translation places on a child: promoted labels required by name, optionally
+ * together with {@code rest} columns each excluding a set of names. This is strictly a top-down propagation
+ * mechanism: a parent passes a requirement down and then reads whatever it needs off the child plan's output.
+ * It is a selection, not an inventory of storage projections: combining requirements only combines
+ * their label names and exclusion sets, without creating physical record projections. A {@code rest} may
+ * overlap the promoted names.
  *
- * @param labels concrete label reads
- * @param skips exclusion sets, one per packed column
+ * @param labels promoted label reads
+ * @param skips exclusion sets, one per {@code rest} column
  */
 public record TranslationConstraint(Set<String> labels, Set<Set<String>> skips) {
     /** No columns: a scalar's constraint, and the identity of {@link #union}. */
@@ -96,11 +97,6 @@ public record TranslationConstraint(Set<String> labels, Set<Set<String>> skips) 
         var retained = new LinkedHashSet<>(constraint.labels);
         retained.retainAll(names);
         return new TranslationConstraint(retained, constraint.skips);
-    }
-
-    /** The smallest skip set: the packed column fixing this table's grain; null when the table is unpacked. */
-    public Set<String> finestSkip() {
-        return skips.stream().min(Comparator.comparingInt(Set::size)).orElse(null);
     }
 
     /** True when this constraint carries at least one packed column. */

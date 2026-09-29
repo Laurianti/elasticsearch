@@ -8,11 +8,20 @@
 package org.elasticsearch.xpack.esql.plan.logical.promql;
 
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
+import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.expression.function.grouping.TimeSeriesWithout;
+import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
+import org.elasticsearch.xpack.esql.plan.logical.Project;
+import org.elasticsearch.xpack.esql.plan.logical.local.EmptyLocalSupplier;
+import org.elasticsearch.xpack.esql.plan.logical.local.LocalRelation;
+import org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.IntermediateResult;
 
 import java.util.List;
 import java.util.Set;
@@ -51,7 +60,6 @@ public class TranslationContextTests extends ESTestCase {
         // the regroup's own column composes as a second, finer skip set
         TranslationConstraint child = union(below, open(Set.of("pod")));
         assertThat(child.skips(), containsInAnyOrder(Set.of("region", "pod"), Set.of("pod")));
-        assertThat(child.finestSkip(), equalTo(Set.of("pod")));
     }
 
     public void testIntersectIsTheUpwardCounterpartOfSubtract() {
@@ -95,6 +103,95 @@ public class TranslationContextTests extends ESTestCase {
         assertThat(TranslationContext.find(List.of(bare, packed), TranslationContext.mapOpen(Set.of("pod"))), sameInstance(packed));
         assertNull(TranslationContext.find(List.of(bare), "pod"));
         assertThat(TranslationContext.mapFinite(List.of(bare, prefixed, attr("pod"))), contains("cluster", "pod"));
+    }
+
+    public void testUnionAllowsRestToOverlapPromoted() {
+        TranslationConstraint header = union(finite(List.of("pod")), open(Set.of()));
+
+        assertThat(header.labels(), contains("pod"));
+        assertThat(header.skips(), contains(Set.of()));
+    }
+
+    public void testMultipleRestsCoexist() {
+        TranslationConstraint header = union(open(Set.of()), open(Set.of("pod")));
+
+        assertThat(header.skips(), containsInAnyOrder(Set.of(), Set.of("pod")));
+    }
+
+    public void testDeliveredLabelsExcludesStepValueAndPackings() {
+        Attribute step = attr("step");
+        Attribute value = attr("value");
+        Attribute pod = attr("pod");
+        Attribute prefixed = new ReferenceAttribute(Source.EMPTY, "labels.cluster", DataType.KEYWORD);
+        var packing = packing(Set.of("region"));
+        var plan = new Aggregate(
+            Source.EMPTY,
+            new LocalRelation(Source.EMPTY, List.of(step, value, pod, prefixed), EmptyLocalSupplier.EMPTY),
+            List.of(step, packing, pod, prefixed),
+            List.of(value, step, packing.toAttribute(), pod, prefixed)
+        );
+
+        assertThat(TranslationContext.deliveredLabels(plan, step, value), containsInAnyOrder("pod", "cluster"));
+    }
+
+    public void testDeliveredSkipsReadsPackingDefinitions() {
+        Attribute step = attr("step");
+        Attribute value = attr("value");
+        var open = packing(Set.of());
+        var pod = packing(Set.of("pod"));
+        var plan = new Aggregate(
+            Source.EMPTY,
+            new LocalRelation(Source.EMPTY, List.of(step, value), EmptyLocalSupplier.EMPTY),
+            List.of(step, open, pod),
+            List.of(value, step, open.toAttribute(), pod.toAttribute())
+        );
+
+        assertThat(TranslationContext.deliveredSkips(plan), containsInAnyOrder(Set.of(), Set.of("pod")));
+
+        // a packing projected away is not carried, even though its definition sits below
+        var projected = new Project(Source.EMPTY, plan, List.of(value, step, open.toAttribute()));
+        assertThat(TranslationContext.deliveredSkips(projected), contains(Set.of()));
+    }
+
+    public void testFinestPackingPicksFewestExclusions() {
+        Attribute step = attr("step");
+        Attribute value = attr("value");
+        var open = packing(Set.of());
+        var pod = packing(Set.of("pod"));
+        var plan = new Aggregate(
+            Source.EMPTY,
+            new LocalRelation(Source.EMPTY, List.of(step, value), EmptyLocalSupplier.EMPTY),
+            List.of(step, pod, open),
+            List.of(value, step, pod.toAttribute(), open.toAttribute())
+        );
+
+        assertThat(TranslationContext.finestPacking(plan).name(), equalTo(TranslationContext.mapOpen(Set.of())));
+
+        var unpacked = new LocalRelation(Source.EMPTY, List.of(value, step), EmptyLocalSupplier.EMPTY);
+        assertNull(TranslationContext.finestPacking(unpacked));
+    }
+
+    public void testIntermediateResultRebuildsAroundNewPlanAndValue() {
+        Attribute step = attr("step");
+        Attribute value = attr("value");
+        var plan = new LocalRelation(Source.EMPTY, List.of(value, step), EmptyLocalSupplier.EMPTY);
+        var table = new IntermediateResult(plan, value, step, Literal.TRUE);
+
+        assertThat(table.valueColumn(), sameInstance(value));
+        assertThat(table.pendingFilter(), sameInstance(Literal.TRUE));
+        assertThat(table.kind(), equalTo(IntermediateResult.Kind.BEFORE_INITIAL_AGGREGATE));
+
+        var next = new LocalRelation(Source.EMPTY, List.of(value, step), EmptyLocalSupplier.EMPTY);
+        var rebuilt = table.with(next, Literal.NULL);
+        assertThat(rebuilt.plan(), sameInstance(next));
+        assertThat(rebuilt.value(), sameInstance(Literal.NULL));
+        assertThat(rebuilt.step(), sameInstance(step));
+        assertThat(rebuilt.pendingFilter(), sameInstance(Literal.TRUE));
+    }
+
+    private static Alias packing(Set<String> skip) {
+        List<Expression> excluded = skip.stream().<Expression>map(TranslationContextTests::attr).toList();
+        return new Alias(Source.EMPTY, TranslationContext.mapOpen(skip), new TimeSeriesWithout(Source.EMPTY, excluded));
     }
 
     private static Attribute attr(String name) {

@@ -31,6 +31,7 @@ import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationConstr
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationConstraint.open;
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationConstraint.subtract;
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationConstraint.union;
+import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.deliveredRequirement;
 import static org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.mapFinite;
 
 /**
@@ -172,10 +173,10 @@ public final class AcrossSeriesAggregate extends PromqlFunctionCall {
     }
 
     /**
-     * Translates {@code AcrossSeriesAggregate} to an ESQL {@code Aggregate}. The header transposed below the
-     * aggregate names every column the subtree must expose, so the child translates once and the aggregate's own
-     * columns are read off the returned header. Only {@code AcrossSeriesAggregate} creates plan-level aggregation
-     * nodes; within-series aggregates and function calls lower to expressions.
+     * Translates {@code AcrossSeriesAggregate} to an ESQL {@code Aggregate}. The requirement transposed below the
+     * aggregate names every column the subtree must expose, so the child translates once and the aggregate groups
+     * by that same requirement. Only {@code AcrossSeriesAggregate} creates plan-level aggregation nodes;
+     * within-series aggregates and function calls lower to expressions.
      */
     @Override
     public IntermediateResult translate(TranslationContext context) {
@@ -191,9 +192,15 @@ public final class AcrossSeriesAggregate extends PromqlFunctionCall {
         if (ir.kind().constant) {
             return ir;
         }
-        TranslationConstraint header = switch (grouping()) {
+        TranslationConstraint requirement = switch (grouping()) {
             case BY -> finite(mapFinite(output()));
-            case WITHOUT -> context.regroupWithout(ir.header(), keys);
+            // A collapse groups by the labels the relation stores; a regroup by what the aggregated child delivers.
+            case WITHOUT -> context.regroupWithout(
+                ir.kind().afterInitialAggregation
+                    ? deliveredRequirement(ir.plan(), ir.step(), ir.value())
+                    : context.rawRequirement(ir, childRequired),
+                keys
+            );
             case NONE -> TranslationConstraint.EMPTY;
         };
 
@@ -201,7 +208,7 @@ public final class AcrossSeriesAggregate extends PromqlFunctionCall {
         Expression function = buildEsqlFunction(ir.value(), promqlCtx);
         // A raw operand collapses once, with the operator's function fused into the per-series aggregate; a table regroups.
         return ir.kind().afterInitialAggregation
-            ? context.regroup(ir, header, grouping() == WITHOUT, function)
-            : context.collapse(ir, header, function);
+            ? context.regroup(ir, requirement, grouping() == WITHOUT, function)
+            : context.collapse(ir, requirement, function);
     }
 }
