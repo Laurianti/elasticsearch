@@ -56,6 +56,8 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.string.EndsWith;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.FieldExtract;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Hash;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.JsonExtract;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.JsonRemovePath;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.JsonSet;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.JsonString;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Left;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.Locate;
@@ -101,6 +103,8 @@ public class ScalarFunctionWritables {
         entries.add(CopySign.ENTRY);
         entries.add(Hash.ENTRY);
         entries.add(JsonExtract.ENTRY);
+        entries.add(JsonRemovePath.ENTRY);
+        entries.add(JsonSet.ENTRY);
         entries.add(JsonString.ENTRY);
         entries.add(Hypot.ENTRY);
         entries.add(In.ENTRY);

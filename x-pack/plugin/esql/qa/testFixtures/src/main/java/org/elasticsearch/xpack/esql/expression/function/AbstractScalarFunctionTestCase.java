@@ -42,6 +42,7 @@ import org.elasticsearch.xpack.esql.expression.function.scalar.multivalue.MvRLik
 import org.elasticsearch.xpack.esql.expression.function.scalar.multivalue.MvUnion;
 import org.elasticsearch.xpack.esql.expression.function.scalar.multivalue.MvZip;
 import org.elasticsearch.xpack.esql.expression.function.scalar.nulls.Coalesce;
+import org.elasticsearch.xpack.esql.expression.function.scalar.string.JsonSet;
 import org.elasticsearch.xpack.esql.expression.function.scalar.string.JsonString;
 import org.elasticsearch.xpack.esql.expression.predicate.nulls.IsNotNull;
 import org.elasticsearch.xpack.esql.expression.predicate.nulls.IsNull;
@@ -91,6 +92,7 @@ public abstract class AbstractScalarFunctionTestCase extends AbstractFunctionTes
         IsNotNull.class, // NULL IS NOT NULL = false
         IsNull.class, // NULL IS NULL = true
         JsonString.class, // JSON_STRING("key", NULL) = {"key":null};
+        JsonSet.class, // JSON_SET("{}", "$.a", NULL) = {"a":null};
 
         // Multivalue functions that treat NULL is an empty set.
         MvContains.class, // MV_CONTAINS([1, 2], NULL) = false

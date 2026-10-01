@@ -116,6 +116,31 @@ final class JsonPath {
         return originalPath;
     }
 
+    /**
+     * Parses a document-modification path into its object-member key names, for functions that
+     * address members but never arrays or the document itself.
+     *
+     * @throws IllegalArgumentException if the path addresses the whole document or contains an array index segment
+     */
+    static List<String> memberKeys(String path) {
+        List<Segment> segments = parse(path).segments();
+        if (segments.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Invalid JSON path [" + path + "]: path must address a member of the document, not the whole document"
+            );
+        }
+        List<String> keys = new ArrayList<>(segments.size());
+        for (Segment segment : segments) {
+            if (segment instanceof Segment.Index) {
+                throw new IllegalArgumentException(
+                    "Invalid JSON path [" + path + "]: array index paths are not supported, only object member paths can be modified"
+                );
+            }
+            keys.add(((Segment.Key) segment).name());
+        }
+        return keys;
+    }
+
     /** Returns the parsed segments. An empty list means "return the root value". */
     List<Segment> segments() {
         return segments;
